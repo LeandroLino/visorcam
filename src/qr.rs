@@ -51,8 +51,11 @@ pub fn read_text(text: &str) -> QrAction {
     if t.is_empty() {
         return QrAction::Unknown("O QR code está vazio.".into());
     }
+    // GoogleScanQRCodeActivity: a short code that FunSDK.DecDevInfo can't open goes to
+    // requestCheckCode -> https://tools.xmeye.net/deviceSuperPassword?text=..&uuid=..&appkey=..
+    // (g3.f.m0): the manufacturer's server, with the app's own key, turns it into the camera.
     if t.len() <= 32 && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return QrAction::Unknown(format!("Este QR traz o código \"{t}\", que não é o número de série da câmera (o número de série tem 16 caracteres de 0-9 e A-F, ou 20 letras e números). Deve ser o código do modelo ou do lote. Procure outro QR na etiqueta (às vezes marcado SN) ou adicione a câmera pela rede."));
+        return QrAction::Unknown(format!("Este é um código de compartilhamento do app iCSee (\"{t}\"). Ele não traz a câmera dentro: o iCSee pergunta ao servidor do fabricante qual câmera é, e este app não usa a nuvem do fabricante. Para adicionar aqui: procure a câmera na rede, digite o IP dela (no iCSee: Configurações da câmera › Sobre/Rede), ou compartilhe pelo VisorCam."));
     }
     QrAction::Unknown(format!("O QR code não é de uma câmera conhecida: {}", short(t)))
 }
@@ -159,8 +162,16 @@ mod tests {
         assert!(matches!(read_text("https://d.jfapp.net/x?shareInfo=zz"), QrAction::Unknown(_)));
         assert!(matches!(read_text("abc"), QrAction::Unknown(_)));
         // a label code that isn't a serial (seen on a real camera)
-        assert!(matches!(read_text("OHJG1302115NQ"), QrAction::Unknown(m) if m.contains("não é o número de série")));
+        assert!(matches!(read_text("OHJG1302115NQ"), QrAction::Unknown(m) if m.contains("compartilhamento do app iCSee")));
         assert!(matches!(read_text("ABCDEFGHIJ0123456789"), QrAction::Serial(_)));
         assert!(matches!(read_text("ABCDEFGHIJ012345"), QrAction::Unknown(_)));
+    }
+
+    /// Read a picture given in VISORCAM_QR and print what it holds (for checking real QRs).
+    #[test]
+    fn read_picture_from_env() {
+        if let Ok(p) = std::env::var("VISORCAM_QR") {
+            println!("QR: {:?}", decode_file(std::path::Path::new(&p)));
+        }
     }
 }

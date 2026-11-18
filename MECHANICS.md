@@ -178,3 +178,9 @@ chaves sn/user/pwd). Os decodificadores são da biblioteca fechada, então aqui 
 número de série puro (g3.f.j1: exatamente 16 caracteres hexadecimais `^[a-fA-F0-9]{16}$` ou 20 letras e dígitos `^[a-zA-Z0-9]{20}$`) e links com "sn=". Também aceitos:
 códigos VisorCam "VC1-" e endereços rtsp://. Fotos grandes são reduzidas a 1600 px antes da
 leitura.
+
+Códigos curtos de compartilhamento do iCSee (ex.: 13 letras e números): GoogleScanQRCodeActivity
+tenta FunSDK.DecDevInfo (XDeCodeStr, decodificação local em base 62); se não sai
+"sn,usuário,senha,tipo", chama requestCheckCode, que pergunta ao servidor do fabricante
+(`https://tools.xmeye.net/deviceSuperPassword?text=..&uuid=..&appkey=..`, g3.f.m0). Este app
+não usa a nuvem nem a chave do fabricante, então explica isso e indica a rede local ou o IP.
