@@ -206,7 +206,7 @@ impl App {
             }
         } else {
             p.rect_filled(r, CornerRadius::same(4), Color32::from_rgb(0x1C, 0x1F, 0x27));
-            let state = self.net.state(&d.id);
+            let state = self.dev_state(&d);
             let msg: Option<String> = if d.rebooting(now) {
                 Some("Reiniciando...".into())
             } else {
@@ -300,7 +300,13 @@ impl App {
         let s = self
             .streams
             .entry(key.clone())
-            .or_insert_with(|| crate::stream::LiveStream::start(&d.host, d.port, &d.user, &d.password, hd));
+            .or_insert_with(|| {
+                if d.is_rtsp() {
+                    crate::stream::LiveStream::start_rtsp(&d.url)
+                } else {
+                    crate::stream::LiveStream::start(&d.host, d.port, &d.user, &d.password, hd)
+                }
+            });
         s.last_used = std::time::Instant::now();
         let status = s.status();
         if !frozen {
@@ -376,6 +382,12 @@ impl App {
 
     /// Send a PTZ start/stop through the camera's open live stream.
     fn send_ptz(&mut self, dev_id: &str, command: &str, stop: bool, zoom: f32) {
+        if self.store.device(dev_id).map(|d| d.is_rtsp()).unwrap_or(false) {
+            if !stop {
+                self.toast("O PTZ ainda não funciona para câmeras RTSP; use o zoom digital.");
+            }
+            return;
+        }
         let hd = *self.live.hd.get(dev_id).unwrap_or(&true);
         let key = format!("{}|{}", dev_id, if hd { "main" } else { "extra1" });
         match self.streams.get(&key) {

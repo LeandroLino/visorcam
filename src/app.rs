@@ -30,6 +30,8 @@ pub enum AddMode {
     Ip,
     Lan,
     Code,
+    Rtsp,
+    Qr,
     #[allow(dead_code)]
     Demo,
 }
@@ -45,6 +47,8 @@ pub struct AddDlg {
     pub scene: u8,
     pub error: Option<String>,
     pub test_id: Option<String>,
+    /// What the last QR picture said (message, is it an error).
+    pub qr_note: Option<(String, bool)>,
     pub pending: Option<Device>,
 }
 
@@ -61,6 +65,7 @@ impl AddDlg {
             scene: 0,
             error: None,
             test_id: None,
+            qr_note: None,
             pending: None,
         }
     }
@@ -147,6 +152,8 @@ pub struct App {
     pub rename_buf: String,
     pub pwd: (String, String, String),
     pub search: String,
+    /// Only cameras of this app on the device list (None: all).
+    pub app_filter: Option<String>,
     pub fullscreen: bool,
     msgs: (i64, Vec<Msg>),
     last_alarm_check: i64,
@@ -215,6 +222,7 @@ impl App {
             rename_buf: String::new(),
             pwd: Default::default(),
             search: String::new(),
+            app_filter: None,
             fullscreen: false,
             msgs: (0, Vec::new()),
             last_alarm_check: now,
@@ -243,6 +251,8 @@ impl App {
             ("me", _) => self.tab = Tab::Me,
             ("add", _) => self.add = Some(AddDlg::new(AddMode::Ip)),
             ("addcode", _) => self.add = Some(AddDlg::new(AddMode::Code)),
+            ("addrtsp", _) => self.add = Some(AddDlg::new(AddMode::Rtsp)),
+            ("addqr", _) => self.add = Some(AddDlg::new(AddMode::Qr)),
             _ => {}
         }
         self
@@ -385,12 +395,28 @@ impl App {
         self.toast(format!("Vídeo salvo no álbum ({})", model::fmt_dur(dur as i64)));
     }
 
+    /// Connection state of a camera: IP cameras are checked by login (net.rs); an RTSP
+    /// camera counts as on-line until its video fails to open.
+    pub fn dev_state(&self, d: &Device) -> crate::net::NetState {
+        use crate::net::NetState;
+        match d.kind {
+            model::DevKind::Rtsp => {
+                let failed = self
+                    .streams
+                    .iter()
+                    .any(|(k, s)| k.starts_with(&format!("{}|", d.id)) && matches!(s.status(), crate::stream::Status::Failed(_)));
+                if failed { NetState::Offline } else { NetState::Online(0) }
+            }
+            _ => self.net.state(&d.id),
+        }
+    }
+
     pub fn add_device(&mut self, d: Device) -> Result<(), String> {
         if self.store.device(&d.id).is_some() {
             return Err("O dispositivo já existe".into());
         }
         self.store.log(&format!("Dispositivo adicionado: {}", d.name));
-        if !d.is_demo() {
+        if d.kind == model::DevKind::Ip {
             self.net.check(&d.id, &d.host, d.port, &d.user, &d.password);
         }
         let id = d.id.clone();
@@ -424,7 +450,7 @@ impl App {
         let now = model::now_i();
         // reachability of cameras added by IP
         for d in &self.store.devices {
-            if !d.is_demo() {
+            if d.kind == model::DevKind::Ip {
                 self.net.ensure(&d.id, &d.host, d.port, &d.user, &d.password);
             }
         }

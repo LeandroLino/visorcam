@@ -105,7 +105,10 @@ pub fn fmt_dur(s: i64) -> String {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DevKind {
     Demo,
+    /// Cameras like the original app's (vendor protocol, port 34567)
     Ip,
+    /// Any camera with an RTSP address (most other brands); video through FFmpeg
+    Rtsp,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -198,6 +201,11 @@ pub struct Device {
     pub added_at: i64,
     pub format_ts: i64,
     pub firmware: String,
+    /// Stream address for RTSP cameras (rtsp://user:password@host:554/path)
+    pub url: String,
+    /// The app this camera came from when it was imported from another app's list
+    /// (empty: added here).
+    pub source: String,
     #[serde(skip)]
     pub reboot_until: i64,
 }
@@ -218,6 +226,8 @@ impl Default for Device {
             added_at: 0,
             format_ts: 0,
             firmware: "V5.00.R02.000529C7.10010.140600.0000000".into(),
+            url: String::new(),
+            source: String::new(),
             reboot_until: 0,
         }
     }
@@ -256,8 +266,53 @@ impl Device {
         }
     }
 
+    /// A camera reached with an RTSP address (another brand).
+    pub fn rtsp(name: &str, url: &str) -> Device {
+        let now = now_i();
+        let host = rtsp_host(url).unwrap_or_default();
+        Device {
+            // the same address is the same camera
+            id: format!("rtsp:{:016x}", fnv(url.trim())),
+            name: name.to_string(),
+            kind: DevKind::Rtsp,
+            host,
+            port: 554,
+            url: url.to_string(),
+            seed: scene::hash64(now as u64),
+            added_at: now,
+            format_ts: now,
+            firmware: String::new(),
+            ..Default::default()
+        }
+    }
+
     pub fn is_demo(&self) -> bool {
         self.kind == DevKind::Demo
+    }
+
+    pub fn is_rtsp(&self) -> bool {
+        self.kind == DevKind::Rtsp
+    }
+
+    /// Which app the camera belongs to, for the filter on the device list.
+    pub fn app_name(&self) -> String {
+        if !self.source.trim().is_empty() {
+            return self.source.trim().to_string();
+        }
+        match self.kind {
+            DevKind::Demo => "Demonstração".into(),
+            DevKind::Ip => "iCSee (XM)".into(),
+            DevKind::Rtsp => "RTSP".into(),
+        }
+    }
+
+    /// Short label for the device card.
+    pub fn kind_label(&self) -> &'static str {
+        match self.kind {
+            DevKind::Demo => "Demonstração",
+            DevKind::Ip => "IP",
+            DevKind::Rtsp => "RTSP",
+        }
     }
 
     pub fn rebooting(&self, now: i64) -> bool {
@@ -697,6 +752,35 @@ pub fn fmt_size_mb(mb: f64) -> String {
     format!("{s}{u}")
 }
 
+/// Host part of an rtsp:// address (after any user:password@).
+pub fn rtsp_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let auth_host = rest.split('/').next()?;
+    let host_port = auth_host.rsplit('@').next()?;
+    let host = host_port.split(':').next()?;
+    if host.is_empty() { None } else { Some(host.to_string()) }
+}
+
+/// rtsp:// (or rtsps://, http:// for MJPEG cameras) with a host.
+pub fn valid_stream_url(url: &str) -> bool {
+    let u = url.trim();
+    (u.starts_with("rtsp://") || u.starts_with("rtsps://") || u.starts_with("http://") || u.starts_with("https://"))
+        && rtsp_host(u).is_some()
+}
+
+/// The address with the password hidden, for showing on screen.
+pub fn hide_password(url: &str) -> String {
+    if let Some((scheme, rest)) = url.split_once("://") {
+        if let Some((auth, tail)) = rest.split_once('@') {
+            if !auth.contains('/') {
+                let user = auth.split(':').next().unwrap_or("");
+                return format!("{scheme}://{user}:•••@{tail}");
+            }
+        }
+    }
+    url.to_string()
+}
+
 // ---- share codes ---------------------------------------------------------
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -742,6 +826,8 @@ struct ShareData {
     s: u64,
     c: u8,
     i: String,
+    #[serde(default)]
+    r: String,
 }
 
 pub fn share_code(d: &Device) -> String {
@@ -754,6 +840,7 @@ pub fn share_code(d: &Device) -> String {
         s: d.seed,
         c: d.scene,
         i: d.id.clone(),
+        r: d.url.clone(),
     };
     format!("VC1-{}", b64e(serde_json::to_string(&data).unwrap_or_default().as_bytes()))
 }
@@ -775,12 +862,152 @@ pub fn device_from_code(code: &str) -> Option<Device> {
             ..Default::default()
         },
         DevKind::Ip => Device::ip(&data.n, &data.h, data.p, &data.u, ""),
+        DevKind::Rtsp => Device::rtsp(&data.n, &data.r),
     })
+}
+
+fn fnv(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+// ---- camera lists shared between apps ----
+//
+// A plain JSON file any camera app can write or read, so cameras from several apps show up in
+// one list:
+// {"format":"visorcam-cameras","version":1,"app":"Nome do app","cameras":[
+//   {"name":"Sala","type":"ip","host":"192.168.1.10","port":34567,"user":"admin","password":""},
+//   {"name":"Garagem","type":"rtsp","url":"rtsp://admin:senha@192.168.1.20:554/stream1"}]}
+
+pub const LIST_FORMAT: &str = "visorcam-cameras";
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CameraList {
+    pub format: String,
+    pub version: u32,
+    pub app: String,
+    pub cameras: Vec<CameraEntry>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CameraEntry {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub host: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub user: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub password: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    /// The app the camera originally came from, when this list passes it on.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub app: String,
+}
+
+/// This app's cameras (demos left out) as a list another app can read.
+pub fn export_list(devices: &[Device]) -> String {
+    let cameras = devices
+        .iter()
+        .filter(|d| !d.is_demo())
+        .map(|d| CameraEntry {
+            name: d.name.clone(),
+            kind: if d.is_rtsp() { "rtsp".into() } else { "ip".into() },
+            host: if d.is_rtsp() { String::new() } else { d.host.clone() },
+            port: if d.is_rtsp() { None } else { Some(d.port) },
+            user: if d.is_rtsp() { String::new() } else { d.user.clone() },
+            password: if d.is_rtsp() { String::new() } else { d.password.clone() },
+            url: d.url.clone(),
+            app: d.source.clone(),
+        })
+        .collect();
+    let list = CameraList { format: LIST_FORMAT.into(), version: 1, app: "VisorCam".into(), cameras };
+    serde_json::to_string_pretty(&list).unwrap_or_default()
+}
+
+/// Read another app's camera list: the app's name, the cameras it could turn into devices,
+/// and what was skipped (with the reason).
+pub fn import_list(text: &str) -> Result<(String, Vec<Device>, Vec<String>), String> {
+    let list: CameraList = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|_| "Este arquivo não é uma lista de câmeras (JSON) que o app entende.".to_string())?;
+    if !list.format.is_empty() && list.format != LIST_FORMAT {
+        return Err(format!("Formato desconhecido: {}", list.format));
+    }
+    if list.cameras.is_empty() {
+        return Err("A lista não tem câmeras.".into());
+    }
+    let app = if list.app.trim().is_empty() { "Outro app".to_string() } else { list.app.trim().to_string() };
+    let mut out = Vec::new();
+    let mut skipped = Vec::new();
+    for (i, c) in list.cameras.iter().enumerate() {
+        let label = if c.name.trim().is_empty() { format!("câmera {}", i + 1) } else { c.name.trim().to_string() };
+        let name: String = label.chars().take(32).collect();
+        let mut d = match c.kind.to_lowercase().as_str() {
+            "rtsp" | "onvif" | "http" => {
+                if !valid_stream_url(&c.url) {
+                    skipped.push(format!("{label}: endereço de vídeo inválido"));
+                    continue;
+                }
+                Device::rtsp(&name, c.url.trim())
+            }
+            "" | "ip" | "xm" | "icsee" | "dvrip" => {
+                if valid_host(c.host.trim()) {
+                    let user = normalize_user(&c.user);
+                    Device::ip(&name, c.host.trim(), c.port.unwrap_or(DEFAULT_PORT), &user, &c.password)
+                } else if valid_stream_url(&c.url) {
+                    Device::rtsp(&name, c.url.trim())
+                } else {
+                    skipped.push(format!("{label}: IP inválido"));
+                    continue;
+                }
+            }
+            other => {
+                skipped.push(format!("{label}: tipo \"{other}\" ainda não suportado"));
+                continue;
+            }
+        };
+        // a camera this list passed on keeps the app it really came from
+        let from = if c.app.trim().is_empty() { app.clone() } else { c.app.trim().to_string() };
+        d.source = if from == "VisorCam" { String::new() } else { from };
+        out.push(d);
+    }
+    Ok((app, out, skipped))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_lists_between_apps() {
+        let text = r#"{"format":"visorcam-cameras","version":1,"app":"Meu App","cameras":[
+            {"name":"Sala","type":"ip","host":"192.168.1.10","port":34567,"user":"","password":"x"},
+            {"name":"Garagem","type":"rtsp","url":"rtsp://a:b@192.168.1.20:554/s1"},
+            {"name":"Ruim","type":"ip","host":"999.1.1.1"},
+            {"name":"Nuvem","type":"tuya"}]}"#;
+        let (app, devs, skipped) = import_list(text).unwrap();
+        assert_eq!(app, "Meu App");
+        assert_eq!(devs.len(), 2);
+        assert_eq!(devs[0].user, DEFAULT_USER);
+        assert_eq!(devs[0].app_name(), "Meu App");
+        assert!(devs[1].is_rtsp());
+        assert_eq!(skipped.len(), 2);
+        // exported and read back: same cameras, same ids, same app
+        let (_, again, _) = import_list(&export_list(&devs)).unwrap();
+        assert_eq!(again.len(), 2);
+        assert_eq!(again[0].id, devs[0].id);
+        assert_eq!(again[1].id, devs[1].id);
+        assert_eq!(again[1].app_name(), "Meu App");
+        assert!(import_list("{}").is_err());
+    }
 
     #[test]
     fn share_roundtrip() {
@@ -807,6 +1034,10 @@ mod tests {
         assert_eq!(sensitivity_from_slider(80), (97, 2));
         assert_eq!(sensitivity_from_slider(26), (50, 1));
         assert_eq!(sensitivity_from_slider(25), (3, 0));
+        assert_eq!(rtsp_host("rtsp://admin:x@192.168.1.20:554/stream1").as_deref(), Some("192.168.1.20"));
+        assert!(valid_stream_url("rtsp://192.168.1.20/live"));
+        assert!(!valid_stream_url("192.168.1.20"));
+        assert_eq!(hide_password("rtsp://admin:segredo@cam/1"), "rtsp://admin:•••@cam/1");
         assert_eq!(name_too_long(&"a".repeat(33)), Some(32));
         assert_eq!(name_too_long(&"ç".repeat(22)), Some(21));
     }

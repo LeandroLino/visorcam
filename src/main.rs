@@ -3,6 +3,7 @@
 mod album;
 mod app;
 mod devices;
+mod qr;
 mod live;
 mod messages;
 mod model;

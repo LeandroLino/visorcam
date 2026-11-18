@@ -159,3 +159,22 @@ The desktop version answers "does the device respond" with a TCP connection to i
 Demo cameras draw a scene from (seed, time); every 10-minute slot has a 22% chance of a
 movement (person 14 s, pet/car 7 s). Live view, recordings, alarm messages and album
 replays use the same function. Alarm recording 5 s before / 30 s after (estimated).
+
+## Outros tipos de câmera (RTSP)
+
+Não vem do app original: é uma extensão deste app. Uma câmera RTSP guarda só um nome e o
+endereço. O FFmpeg abre o endereço (`-rtsp_transport tcp`, sem buffer de entrada) e envia
+quadros RGB de 1280×720, com a imagem reduzida para caber e faixas pretas quando a
+proporção é outra. A câmera aparece "On-line" até o vídeo falhar; clicar no cartão tenta
+de novo. Endereços aceitos: rtsp://, rtsps://, http:// e https:// com um host. O código de
+compartilhamento de uma câmera RTSP leva o endereço inteiro (com a senha, se houver).
+
+## QR code (SnAddDevActivity.onActivityResult)
+
+O original lê o resultado "Scan_QrCode_Result": se for um número de série válido (g3.f.j1)
+usa-o direto; sem "http" passa por FunSDK.DecDevInfo ("sn,usuário,senha,tipo[,hora]", que
+expira em 1800 s); com link lê "shareInfo" (DecGeneralDevInfo) ou "sv" (DecQRCodeDevInfo,
+chaves sn/user/pwd). Os decodificadores são da biblioteca fechada, então aqui só valem o
+número de série puro (g3.f.j1: exatamente 16 caracteres hexadecimais `^[a-fA-F0-9]{16}$` ou 20 letras e dígitos `^[a-zA-Z0-9]{20}$`) e links com "sn=". Também aceitos:
+códigos VisorCam "VC1-" e endereços rtsp://. Fotos grandes são reduzidas a 1600 px antes da
+leitura.

@@ -248,7 +248,7 @@ impl App {
                 self.pwd = Default::default();
                 self.store.log(&format!("Senha modificada: {}", d.name));
                 self.toast("Senha modificada");
-                if !d.is_demo() {
+                if d.kind == model::DevKind::Ip {
                     // like FunSDK.DevSetLocalPwd: the stored login is used from the next connection
                     self.net.check(&d.id, &d.host, d.port, &d.user, &d.password);
                 }
@@ -277,10 +277,14 @@ impl App {
         }
         info(ui, "Hora do dispositivo", model::fmt_datetime(now));
         info(ui, "Fuso horário", d.settings.timezone.clone());
-        let mode = if d.is_demo() { "Wi-Fi (demonstração)".to_string() } else { format!("IP {}:{}", d.host, d.port) };
+        let mode = match d.kind {
+            model::DevKind::Demo => "Wi-Fi (demonstração)".to_string(),
+            model::DevKind::Ip => format!("IP {}:{}", d.host, d.port),
+            model::DevKind::Rtsp => format!("RTSP {}", model::hide_password(&d.url)),
+        };
         info(ui, "Modo de rede", mode);
         if !d.is_demo() {
-            let st = match self.net.state(&d.id) {
+            let st = match self.dev_state(d) {
                 NetState::Online(ms) => format!("On-line ({ms} ms)"),
                 NetState::Offline => "Off-line".into(),
                 NetState::WrongPassword => "Senha incorreta".into(),

@@ -37,12 +37,60 @@ impl App {
             }
         }
 
+        // cameras of every app in one list, with a filter by app
+        let mut apps: Vec<(String, usize)> = Vec::new();
+        for d in &self.store.devices {
+            let a = d.app_name();
+            match apps.iter_mut().find(|(n, _)| *n == a) {
+                Some((_, c)) => *c += 1,
+                None => apps.push((a, 1)),
+            }
+        }
+        if let Some(f) = &self.app_filter {
+            if !apps.iter().any(|(n, _)| n == f) {
+                self.app_filter = None;
+            }
+        }
+        let mut import = false;
+        let mut export = false;
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            if !apps.is_empty() {
+                if ui::chip(ui, self.app_filter.is_none(), &format!("Todos ({})", self.store.devices.len())).clicked() {
+                    self.app_filter = None;
+                }
+                for (n, c) in &apps {
+                    if ui::chip(ui, self.app_filter.as_deref() == Some(n.as_str()), &format!("{n} ({c})")).clicked() {
+                        self.app_filter = Some(n.clone());
+                    }
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(20.0);
+                if ui.button("Exportar lista").on_hover_text("Salvar as câmeras num arquivo que outro app pode importar").clicked() {
+                    export = true;
+                }
+                if ui.button("Importar câmeras de outro app").on_hover_text("Ler a lista de câmeras (arquivo .json) exportada por outro app").clicked() {
+                    import = true;
+                }
+            });
+        });
+        if import {
+            self.import_cameras();
+        }
+        if export {
+            self.export_cameras();
+        }
+
         let q = self.search.trim().to_lowercase();
+        let filter = self.app_filter.clone();
         let devs: Vec<Device> = self
             .store
             .devices
             .iter()
             .filter(|d| q.is_empty() || d.name.to_lowercase().contains(&q) || d.id.to_lowercase().contains(&q))
+            .filter(|d| filter.as_ref().map(|f| d.app_name() == *f).unwrap_or(true))
             .cloned()
             .collect();
 
@@ -85,6 +133,46 @@ impl App {
         });
     }
 
+    /// Add the cameras of another app's list (model::import_list), skipping ones already here.
+    fn import_cameras(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("Lista de câmeras", &["json"]).pick_file() else { return };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => return self.alert(format!("Não foi possível ler o arquivo: {e}")),
+        };
+        match model::import_list(&text) {
+            Err(e) => self.alert(e),
+            Ok((app, devs, mut skipped)) => {
+                let mut added = 0;
+                for d in devs {
+                    let name = d.name.clone();
+                    match self.add_device(d) {
+                        Ok(()) => added += 1,
+                        Err(e) => skipped.push(format!("{name}: {e}")),
+                    }
+                }
+                self.store.log(&format!("Câmeras importadas de {app}: {added}"));
+                if skipped.is_empty() {
+                    self.toast(format!("{added} câmera(s) importada(s) de {app}"));
+                } else {
+                    self.alert(format!("{added} câmera(s) importada(s) de {app}. Não importadas:\n{}", skipped.join("\n")));
+                }
+            }
+        }
+    }
+
+    /// Save this app's cameras as a list another app can import.
+    fn export_cameras(&mut self) {
+        if self.store.devices.iter().all(|d| d.is_demo()) {
+            return self.toast("Adicione um dispositivo primeiro");
+        }
+        let Some(path) = rfd::FileDialog::new().set_file_name("cameras-visorcam.json").add_filter("Lista de câmeras", &["json"]).save_file() else { return };
+        match std::fs::write(&path, model::export_list(&self.store.devices)) {
+            Ok(()) => self.toast("Lista salva. Ela inclui as senhas das câmeras: guarde o arquivo com cuidado."),
+            Err(e) => self.alert(format!("Falha ao salvar a lista: {e}")),
+        }
+    }
+
     fn device_card(&mut self, ui: &mut egui::Ui, d: &Device, w: f32) {
         let now = model::now_i();
         let ph = w * 9.0 / 16.0;
@@ -102,7 +190,7 @@ impl App {
                 NetState::Online(0)
             }
         } else {
-            self.net.state(&d.id)
+            self.dev_state(d)
         };
         let (st_text, st_col) = match state {
             NetState::Online(_) => ("On-line", THEME),
@@ -120,7 +208,7 @@ impl App {
         let name_w = name.size().x.min(w - 170.0);
         p.with_clip_rect(Rect::from_min_size(egui::pos2(rect.left() + 30.0, rect.top()), egui::vec2(name_w, 46.0)))
             .galley(egui::pos2(rect.left() + 30.0, hy - name.size().y / 2.0), name, TEXT);
-        let tag = if d.is_demo() { "Demonstração" } else { "IP" };
+        let tag = if d.source.is_empty() { d.kind_label().to_string() } else { d.source.clone() };
         p.text(egui::pos2(rect.right() - 14.0, hy), egui::Align2::RIGHT_CENTER, format!("{st_text} · {tag}"), egui::FontId::proportional(12.5), st_col);
 
         // preview
@@ -163,7 +251,8 @@ impl App {
                 if let Some(tex) = last {
                     ui::paint_image(&p, tex, pr, 10);
                 } else {
-                    p.text(pr.center() - egui::vec2(0.0, 10.0), egui::Align2::CENTER_CENTER, format!("Conectado ({} ms)", ms), egui::FontId::proportional(14.0), Color32::WHITE);
+                    let head = if d.is_rtsp() { "Câmera RTSP".to_string() } else { format!("Conectado ({} ms)", ms) };
+                    p.text(pr.center() - egui::vec2(0.0, 10.0), egui::Align2::CENTER_CENTER, head, egui::FontId::proportional(14.0), Color32::WHITE);
                     p.text(pr.center() + egui::vec2(0.0, 14.0), egui::Align2::CENTER_CENTER, "Clique para ver ao vivo", egui::FontId::proportional(12.0), Color32::from_gray(190));
                 }
             }
@@ -185,7 +274,11 @@ impl App {
             }
         }
         if presp.clicked() {
-            if !d.is_demo() && !state.is_online() {
+            if d.is_rtsp() {
+                // try the address again
+                self.streams.retain(|k, _| !k.starts_with(&format!("{}|", d.id)));
+                self.open_live(std::slice::from_ref(&d.id));
+            } else if !d.is_demo() && !state.is_online() {
                 self.net.check(&d.id, &d.host, d.port, &d.user, &d.password);
                 self.toast("Verificando a conexão...");
             } else {
@@ -353,6 +446,7 @@ impl App {
         let mut dlg = self.add.take().unwrap();
         let mut close = false;
         let mut to_add: Option<Device> = None;
+        let mut qr_file: Option<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
         egui::Window::new("Adicionar dispositivo")
             .collapsible(false)
             .resizable(false)
@@ -365,6 +459,8 @@ impl App {
                         (AddMode::Ip, "Adicionar via IP"),
                         (AddMode::Lan, "Procurar por dispositivo"),
                         (AddMode::Code, "Código"),
+                        (AddMode::Qr, "QR code"),
+                        (AddMode::Rtsp, "Outra câmera (RTSP)"),
                     ] {
                         if ui::chip(ui, dlg.mode == m, label).clicked() {
                             dlg.mode = m;
@@ -531,6 +627,57 @@ impl App {
                             }
                         }
                     }
+                    AddMode::Qr => {
+                        ui.label(egui::RichText::new("Escolha uma foto ou imagem com o QR code: a etiqueta da câmera (número de série), o QR de compartilhamento do VisorCam ou um QR com endereço rtsp://. Também dá para arrastar a imagem para esta janela.").color(TEXT2));
+                        ui.add_space(6.0);
+                        if ui::primary(ui, "Escolher imagem...").clicked() {
+                            if let Some(path) = rfd::FileDialog::new().add_filter("Imagens", &["png", "jpg", "jpeg"]).pick_file() {
+                                qr_file = Some(path);
+                            }
+                        }
+                        if let Some((t, err)) = dlg.qr_note.clone() {
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new(t).color(if err { ui::ORANGE } else { THEME }));
+                            {
+                                ui.horizontal(|ui| {
+                                    if ui.button("Procurar na rede").clicked() {
+                                        dlg.mode = AddMode::Lan;
+                                    }
+                                    if ui.button("Digitar o IP").clicked() {
+                                        dlg.mode = AddMode::Ip;
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    AddMode::Rtsp => {
+                        ui.label(egui::RichText::new("Para câmeras de outras marcas que têm um endereço RTSP (quase todas as câmeras IP: Intelbras, Hikvision, Dahua, TP-Link Tapo, Reolink...). O endereço costuma estar no manual ou no app da câmera. O vídeo é aberto pelo programa gratuito FFmpeg.").color(TEXT2));
+                        ui.add_space(4.0);
+                        egui::Grid::new("rtspgrid").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
+                            ui.label("Nome do dispositivo");
+                            ui.add(egui::TextEdit::singleline(&mut dlg.name).hint_text("Opcional (usa o endereço)").desired_width(330.0));
+                            ui.end_row();
+                            ui.label("Endereço RTSP");
+                            ui.add(egui::TextEdit::singleline(&mut dlg.host).hint_text("rtsp://usuario:senha@192.168.1.20:554/stream1").desired_width(330.0));
+                            ui.end_row();
+                        });
+                        ui.label(egui::RichText::new("Exemplos: Intelbras/Dahua rtsp://admin:senha@IP:554/cam/realmonitor?channel=1&subtype=0 · Hikvision rtsp://admin:senha@IP:554/Streaming/Channels/101 · Tapo rtsp://usuario:senha@IP:554/stream1").small().color(TEXT3));
+                        if crate::stream::find_ffmpeg().is_none() {
+                            ui.label(egui::RichText::new("O FFmpeg não foi encontrado neste computador: instale-o (ffmpeg.org) para ver o vídeo.").small().color(ui::ORANGE));
+                        }
+                        ui.add_space(4.0);
+                        if ui::primary(ui, "Adicionar").clicked() {
+                            let url = dlg.host.trim().to_string();
+                            if !model::valid_stream_url(&url) {
+                                dlg.error = Some("Endereço inválido: ele começa com rtsp:// e tem o IP da câmera".into());
+                            } else if let Some(n) = model::name_too_long(&dlg.name) {
+                                dlg.error = Some(format!("Digitar nome do dispositivo (1 e {n} caracteres)"));
+                            } else {
+                                let name = if dlg.name.trim().is_empty() { model::rtsp_host(&url).unwrap_or_default() } else { dlg.name.trim().to_string() };
+                                to_add = Some(Device::rtsp(&name, &url));
+                            }
+                        }
+                    }
                     AddMode::Demo => {
                         ui.label(egui::RichText::new("Uma câmera simulada, para conhecer o aplicativo.").color(TEXT2));
                         ui.horizontal(|ui| {
@@ -560,6 +707,29 @@ impl App {
                     ui.colored_label(ui::RED, e);
                 }
             });
+        if let Some(path) = qr_file {
+            use crate::qr::QrAction;
+            dlg.mode = AddMode::Qr;
+            dlg.error = None;
+            match crate::qr::decode_file(&path).map(|t| crate::qr::read_text(&t)) {
+                Err(e) => dlg.qr_note = Some((e, true)),
+                Ok(QrAction::Add(d)) => {
+                    dlg.qr_note = None;
+                    to_add = Some(d);
+                }
+                Ok(QrAction::Rtsp(url)) => {
+                    dlg.qr_note = None;
+                    dlg.mode = AddMode::Rtsp;
+                    dlg.host = url;
+                    self.toast("QR lido: confira o endereço e clique em Adicionar");
+                }
+                Ok(QrAction::Serial(sn)) => {
+                    dlg.name = sn.clone();
+                    dlg.qr_note = Some((format!("Número de série lido: {sn}. Este app conecta pela rede local, então falta achar o IP da câmera: procure na rede ou digite o IP (o número de série vira o nome)."), false));
+                }
+                Ok(QrAction::Unknown(m)) => dlg.qr_note = Some((m, true)),
+            }
+        }
         if let Some(d) = to_add {
             let name = d.name.clone();
             match self.add_device(d) {
@@ -583,6 +753,7 @@ impl App {
         let code = model::share_code(&d);
         let mut open = true;
         let mut copied = false;
+        let mut qr_saved: Option<Result<std::path::PathBuf, String>> = None;
         egui::Window::new("Compartilhar com amigos")
             .collapsible(false)
             .resizable(false)
@@ -591,24 +762,42 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_width(440.0);
                 ui.vertical_centered(|ui| {
-                    let (r, _) = ui.allocate_exact_size(egui::vec2(170.0, 170.0), Sense::hover());
-                    draw_pattern(ui.painter(), r, &code);
+                    let (r, _) = ui.allocate_exact_size(egui::vec2(200.0, 200.0), Sense::hover());
+                    crate::qr::paint(ui.painter(), r, &code);
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new(&d.name).strong().color(TEXT));
                 });
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new("Envie este código para quem vai adicionar a câmera. A pessoa abre + Adicionar dispositivo › Código, cola o código e clica em Adicionar.").color(TEXT2));
+                ui.label(egui::RichText::new("Envie este código (ou a imagem do QR) para quem vai adicionar a câmera. A pessoa abre + Adicionar dispositivo › Código e cola o código, ou › QR code e escolhe a imagem.").color(TEXT2));
                 let mut c = code.clone();
                 ui.add(egui::TextEdit::multiline(&mut c).desired_rows(3).desired_width(420.0).font(egui::TextStyle::Monospace));
-                if !d.is_demo() {
+                if d.is_rtsp() {
+                    ui.label(egui::RichText::new("O código leva o endereço RTSP inteiro, com usuário e senha se houver: envie só para quem pode ver a câmera.").small().color(ui::ORANGE));
+                } else if !d.is_demo() {
                     ui.label(egui::RichText::new("A senha do dispositivo não vai no código.").small().color(TEXT3));
                 }
                 ui.add_space(6.0);
-                if ui::primary(ui, "Copiar código").clicked() {
-                    ctx.copy_text(code.clone());
-                    copied = true;
-                }
+                ui.horizontal(|ui| {
+                    if ui::primary(ui, "Copiar código").clicked() {
+                        ctx.copy_text(code.clone());
+                        copied = true;
+                    }
+                    if ui.button("Salvar QR como imagem").clicked() {
+                        qr_saved = Some(save_share_qr(&self.album_path(), &d, &code));
+                    }
+                });
             });
+        match qr_saved {
+            Some(Ok(path)) => {
+                self.store.shares.push(model::ShareRec { ts: model::now_i(), dev_id: d.id.clone(), dev_name: d.name.clone(), code: code.clone() });
+                self.store.log(&format!("QR de compartilhamento salvo: {}", d.name));
+                self.dirty = true;
+                self.toast(format!("QR salvo: {}", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
+                model::open_in_files(&path, true);
+            }
+            Some(Err(e)) => self.alert(e),
+            None => {}
+        }
         if copied {
             self.store.shares.push(model::ShareRec { ts: model::now_i(), dev_id: d.id.clone(), dev_name: d.name.clone(), code });
             self.store.log(&format!("Código de compartilhamento criado: {}", d.name));
@@ -649,38 +838,6 @@ fn parse_ip(dlg: &mut AddDlg) -> Result<Device, String> {
     Ok(Device::ip(&name, &host, port, &user, dlg.password.trim()))
 }
 
-/// A square pattern drawn from the code (looks like a QR code; scan is not supported).
-fn draw_pattern(p: &egui::Painter, r: Rect, code: &str) {
-    p.rect_filled(r, CornerRadius::same(6), Color32::WHITE);
-    p.rect_stroke(r, CornerRadius::same(6), Stroke::new(1.0_f32, ui::DIVIDER), egui::StrokeKind::Inside);
-    let n = 25;
-    let cell = (r.width() - 16.0) / n as f32;
-    let mut h: u64 = 1469598103934665603;
-    for b in code.bytes() {
-        h = (h ^ b as u64).wrapping_mul(1099511628211);
-    }
-    let finder = |x: usize, y: usize| -> Option<bool> {
-        for (fx, fy) in [(0, 0), (n - 7, 0), (0, n - 7)] {
-            if x >= fx && x < fx + 7 && y >= fy && y < fy + 7 {
-                let dx = x - fx;
-                let dy = y - fy;
-                let ring = dx == 0 || dy == 0 || dx == 6 || dy == 6;
-                let core = (2..5).contains(&dx) && (2..5).contains(&dy);
-                return Some(ring || core);
-            }
-        }
-        None
-    };
-    for y in 0..n {
-        for x in 0..n {
-            let on = finder(x, y).unwrap_or_else(|| crate::scene::h2(h, (y * n + x) as u64) % 2 == 0);
-            if on {
-                let c = Rect::from_min_size(r.min + egui::vec2(8.0 + x as f32 * cell, 8.0 + y as f32 * cell), egui::vec2(cell + 0.5, cell + 0.5));
-                p.rect_filled(c, CornerRadius::ZERO, Color32::from_rgb(0x1E, 0x22, 0x31));
-            }
-        }
-    }
-}
 
 /// Which part of the sharing help to show.
 #[derive(Clone, Copy, PartialEq)]
@@ -753,4 +910,13 @@ pub fn share_help(ui: &mut egui::Ui, which: ShareHelp) {
         .small()
         .color(TEXT3),
     );
+}
+
+/// Save the share code as a QR picture in the album folder.
+fn save_share_qr(dir: &std::path::Path, d: &Device, code: &str) -> Result<std::path::PathBuf, String> {
+    let img = crate::qr::render(code, 8).ok_or("O código é grande demais para um QR")?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("Falha ao salvar o QR: {e}"))?;
+    let path = dir.join(format!("{}_qr.png", model::file_safe_id(&d.name)));
+    img.save(&path).map_err(|e| format!("Falha ao salvar o QR: {e}"))?;
+    Ok(path)
 }

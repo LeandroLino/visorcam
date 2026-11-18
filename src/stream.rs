@@ -112,6 +112,26 @@ impl LiveStream {
         LiveStream { frame, status, stop, ptz, last_used: Instant::now() }
     }
 
+    /// A camera with an RTSP (or HTTP MJPEG) address: FFmpeg opens it and sends back
+    /// RGB pictures of RTSP_W × RTSP_H (scaled to fit, with black bars).
+    pub fn start_rtsp(url: &str) -> LiveStream {
+        let frame = Arc::new(Mutex::new(None));
+        let status = Arc::new(Mutex::new(Status::Connecting));
+        let stop = Arc::new(AtomicBool::new(false));
+        let ptz = Arc::new(Mutex::new(Vec::new()));
+        let (f2, s2, st2, u) = (frame.clone(), status.clone(), stop.clone(), url.to_string());
+        std::thread::spawn(move || {
+            if let Err(e) = run_rtsp(&u, &f2, &s2, &st2) {
+                if !st2.load(Ordering::SeqCst) {
+                    if let Ok(mut s) = s2.lock() {
+                        *s = Status::Failed(e);
+                    }
+                }
+            }
+        });
+        LiveStream { frame, status, stop, ptz, last_used: Instant::now() }
+    }
+
     /// Queue a PTZ start or stop (sent by the stream's command-connection thread).
     pub fn ptz(&self, command: &str, stop: bool, step: i32) {
         if let Ok(mut q) = self.ptz.lock() {
@@ -248,6 +268,77 @@ fn run(
             }
         }
     }
+    Ok(())
+}
+
+pub const RTSP_W: usize = 1280;
+pub const RTSP_H: usize = 720;
+
+fn run_rtsp(url: &str, frame: &Arc<Mutex<Option<Frame>>>, status: &Arc<Mutex<Status>>, stop: &Arc<AtomicBool>) -> Result<(), String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let exe = find_ffmpeg().ok_or_else(|| "Para câmeras RTSP o app usa o programa gratuito FFmpeg, que não foi encontrado neste computador.".to_string())?;
+    let (w, h) = (RTSP_W, RTSP_H);
+    let mut cmd = Command::new(exe);
+    if url.starts_with("rtsp") {
+        // live camera: no input buffering (this setting breaks files and HTTP sources)
+        cmd.args(["-rtsp_transport", "tcp", "-fflags", "nobuffer"]);
+    }
+    cmd.args([
+        "-hide_banner", "-loglevel", "error",
+        "-flags", "low_delay",
+        "-i", url,
+        "-an",
+        "-vf", &format!("scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"),
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("Não foi possível abrir o FFmpeg: {e}"))?;
+    let mut out = child.stdout.take().ok_or("FFmpeg sem saída")?;
+    let mut err = child.stderr.take().ok_or("FFmpeg sem saída")?;
+    let err_text = Arc::new(Mutex::new(String::new()));
+    let e2 = err_text.clone();
+    std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = err.read_to_string(&mut s);
+        if let Ok(mut m) = e2.lock() {
+            *m = s;
+        }
+    });
+    let mut buf = vec![0u8; w * h * 3];
+    let mut seq = 0u64;
+    let t0 = Instant::now();
+    while !stop.load(Ordering::SeqCst) {
+        if out.read_exact(&mut buf).is_err() {
+            let _ = child.wait();
+            std::thread::sleep(Duration::from_millis(200));
+            let detail = err_text.lock().map(|s| s.lines().last().unwrap_or("").to_string()).unwrap_or_default();
+            return Err(if detail.contains("401") || detail.to_lowercase().contains("unauthorized") {
+                "Usuário ou senha do endereço RTSP incorretos".to_string()
+            } else if detail.is_empty() {
+                "A câmera não enviou vídeo por este endereço".to_string()
+            } else {
+                format!("A câmera não enviou vídeo por este endereço ({detail})")
+            });
+        }
+        seq += 1;
+        if let Ok(mut f) = frame.lock() {
+            *f = Some(Frame { w, h, rgb: buf.clone(), seq });
+        }
+        let fps = (seq as f32 / t0.elapsed().as_secs_f32().max(0.5)).round() as u32;
+        if let Ok(mut s) = status.lock() {
+            *s = Status::Playing { codec: "RTSP", w, h, fps };
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
     Ok(())
 }
 
@@ -610,6 +701,33 @@ mod tests {
         let mut dec = Decoder::new();
         let (w, h, rgb) = dec.decode(&vf).unwrap().expect("picture");
         assert_eq!((w, h, rgb.len()), (64, 64, 64 * 64 * 3));
+    }
+
+    #[test]
+    fn other_cameras_open_through_ffmpeg() {
+        // FFmpeg reads any address it understands; a local file stands in for a camera.
+        let Some(exe) = find_ffmpeg() else { return };
+        let file = std::env::temp_dir().join("visorcam-rtsp-test.mp4");
+        let ok = std::process::Command::new(exe)
+            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=10", "-t", "3", "-pix_fmt", "yuv420p"])
+            .arg(&file)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(ok);
+        let s = LiveStream::start_rtsp(&file.to_string_lossy());
+        let t0 = Instant::now();
+        while s.frame.lock().unwrap().is_none() && t0.elapsed() < Duration::from_secs(15) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let f = s.frame.lock().unwrap().as_ref().map(|f| (f.w, f.h, f.rgb.len()));
+        assert_eq!(f, Some((RTSP_W, RTSP_H, RTSP_W * RTSP_H * 3)));
+        // a 16:9 picture fills the 16:9 frame: the middle is not black
+        let fr = s.frame.lock().unwrap();
+        let fr = fr.as_ref().unwrap();
+        let mid = ((RTSP_H / 2) * RTSP_W + RTSP_W / 2) * 3;
+        assert!(fr.rgb[mid..mid + 3].iter().any(|&v| v > 0));
+        s.stop.store(true, Ordering::SeqCst);
     }
 
     #[test]
