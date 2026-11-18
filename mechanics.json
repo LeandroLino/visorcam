@@ -1,0 +1,502 @@
+{
+ "version": 1,
+ "values": [
+  {
+   "name": "default device port",
+   "group": "add device",
+   "value": 34567,
+   "unit": "tcp port",
+   "source": "AddDeviceByIPActivity.K1 @0x00c5 (const 0x8707)"
+  },
+  {
+   "name": "port accepted only as digits",
+   "group": "add device",
+   "value": "[0-9]*",
+   "source": "g3.f.Z0 @0x0000"
+  },
+  {
+   "name": "IP check",
+   "group": "add device",
+   "value": "strict IPv4 only",
+   "source": "g3.f.X0 @0x0004, AddDeviceByIPActivity.K1 @0x009b"
+  },
+  {
+   "name": "default login name",
+   "group": "add device",
+   "value": "admin",
+   "source": "AddDeviceByIPActivity.K1 @0x0144"
+  },
+  {
+   "name": "login aliases turned into admin",
+   "group": "add device",
+   "value": "default, 666666, guest",
+   "source": "AddDeviceByIPActivity.K1 @0x0155-0x0176"
+  },
+  {
+   "name": "empty device name uses IP",
+   "group": "add device",
+   "value": true,
+   "source": "AddDeviceByIPActivity.K1 @0x0126"
+  },
+  {
+   "name": "device id format",
+   "group": "add device",
+   "value": "ip:port",
+   "source": "AddDeviceByIPActivity.K1 @0x0107"
+  },
+  {
+   "name": "device name max length (v0.e characters)",
+   "group": "add device",
+   "value": 32,
+   "unit": "characters",
+   "source": "AddDeviceByIPActivity.K1 @0x0059, com.xworld.utils.v0.e @0x0008"
+  },
+  {
+   "name": "device name max length other",
+   "group": "add device",
+   "value": 21,
+   "unit": "characters",
+   "source": "AddDeviceByIPActivity.K1 @0x007f"
+  },
+  {
+   "name": "device must answer before it is added",
+   "group": "add device",
+   "value": true,
+   "source": "AddDeviceByIPActivity.OnFunSDKResult 5009 (Device_NotExist)"
+  },
+  {
+   "name": "add button needs an IP",
+   "group": "add device",
+   "value": true,
+   "source": "AddDeviceByIPActivity$b.afterTextChanged"
+  },
+  {
+   "name": "sensitivity high above",
+   "group": "alarm",
+   "value": 75,
+   "unit": "slider %",
+   "source": "DevVideoAlarmSetActivity.onStopTrackingTouch"
+  },
+  {
+   "name": "sensitivity middle above",
+   "group": "alarm",
+   "value": 25,
+   "unit": "slider %",
+   "source": "DevVideoAlarmSetActivity.onStopTrackingTouch"
+  },
+  {
+   "name": "sensitivity snap positions",
+   "group": "alarm",
+   "value": "3 / 50 / 97",
+   "source": "DevVideoAlarmSetActivity.onStopTrackingTouch"
+  },
+  {
+   "name": "sensitivity device levels",
+   "group": "alarm",
+   "value": "1 / 3 / 6",
+   "source": "DevVideoAlarmSetActivity.onStopTrackingTouch"
+  },
+  {
+   "name": "alarm interval minimum",
+   "group": "alarm",
+   "value": 30,
+   "unit": "s",
+   "source": "AlarmIntervalDlg.p / onProgressChanged (progress + 30)"
+  },
+  {
+   "name": "alarm interval maximum",
+   "group": "alarm",
+   "value": 1800,
+   "unit": "s",
+   "source": "AlarmIntervalDlg.p setMax(1770) + 30"
+  },
+  {
+   "name": "alarm interval default",
+   "group": "alarm",
+   "value": 30,
+   "unit": "s",
+   "estimated": true
+  },
+  {
+   "name": "playback speeds",
+   "group": "playback",
+   "value": "-4x, -2x, 1x, 2x, 4x",
+   "source": "PlayBackActivity.onSpeedPlay @0x0015/@0x0048, layout_playback_speed.xml"
+  },
+  {
+   "name": "playback speed factor per level",
+   "group": "playback",
+   "value": "2^level (1/4, 1/2, 1, 2, 4)",
+   "estimated": true
+  },
+  {
+   "name": "video file length minimum",
+   "group": "recording",
+   "value": 5,
+   "unit": "min",
+   "source": "DevRecordSettingActivity.onProgressChanged @0x0020; devset_record.xml"
+  },
+  {
+   "name": "video file length maximum",
+   "group": "recording",
+   "value": 120,
+   "unit": "min",
+   "source": "devset_record.xml seekBarBottomRightText=120"
+  },
+  {
+   "name": "video file length default",
+   "group": "recording",
+   "value": 60,
+   "unit": "min",
+   "estimated": true
+  },
+  {
+   "name": "record modes",
+   "group": "recording",
+   "value": "Sempre gravar, Alarme, Não registrar",
+   "source": "language pt_BR TR_Record_Always/Alarm/Close"
+  },
+  {
+   "name": "storage full actions",
+   "group": "storage",
+   "value": "OverWrite (cíclica), StopRecord (parar)",
+   "source": "DevStorageSettingActivity.T1"
+  },
+  {
+   "name": "storage size format",
+   "group": "storage",
+   "value": "#.00 with M/G/T/P, /1024 per step, input MB",
+   "source": "com.xworld.utils.E.b(J,I)"
+  },
+  {
+   "name": "free space percent",
+   "group": "storage",
+   "value": "min(remain*100/total, 100), #0.0",
+   "source": "DevStorageSettingActivity.U1"
+  },
+  {
+   "name": "memory card usable size",
+   "group": "storage",
+   "value": 29.7,
+   "unit": "GB",
+   "estimated": true
+  },
+  {
+   "name": "HD recording rate",
+   "group": "storage",
+   "value": 0.46,
+   "unit": "GB/h",
+   "estimated": true
+  },
+  {
+   "name": "SD recording rate",
+   "group": "storage",
+   "value": 0.23,
+   "unit": "GB/h",
+   "estimated": true
+  },
+  {
+   "name": "speaker and mic volume range",
+   "group": "basic",
+   "value": "0-100",
+   "source": "DevBasicSettingActivity extraSeekbar.setMax(100)"
+  },
+  {
+   "name": "day/night modes",
+   "group": "basic",
+   "value": "Troca automática, Modo diurno, Modo noturno, Troca programada",
+   "source": "DevDayNightModeActivity.O1/P1/Q1/R1 SwitchMode 0-3"
+  },
+  {
+   "name": "day/night sensitivity range",
+   "group": "basic",
+   "value": "0-10, (50 - DncThr)/4",
+   "source": "DevBasicSettingActivity.y2"
+  },
+  {
+   "name": "day/night switch point",
+   "group": "basic",
+   "value": "daylight < 0.10 + 0.05 x sensitivity",
+   "estimated": true
+  },
+  {
+   "name": "snapshot file name",
+   "group": "live",
+   "value": "<devId>_<channel>_<millis>.jpg, spaces and ':' removed",
+   "source": "XMMediaPlayer.i @0x003a-0x0076, E.i"
+  },
+  {
+   "name": "recording file name",
+   "group": "live",
+   "value": "<devId>_<channel>_<millis>.mp4",
+   "source": "XMMediaPlayer.S1 @0x0069-0x00ea"
+  },
+  {
+   "name": "snapshot/record only while playing",
+   "group": "live",
+   "value": true,
+   "source": "XMMediaPlayer.S1 @0x0011, XMMediaPlayer.i @0x0010"
+  },
+  {
+   "name": "recording timer tick",
+   "group": "live",
+   "value": 1000,
+   "unit": "ms",
+   "source": "XMMediaPlayer.S1 @0x0121"
+  },
+  {
+   "name": "message search days max",
+   "group": "messages",
+   "value": 7,
+   "unit": "days",
+   "source": "AlarmPicVideoShowActivity (selectedDates.size() > 7)"
+  },
+  {
+   "name": "theme colour",
+   "group": "look",
+   "value": "#00BFA5",
+   "source": "res colors.xml app_theme_color"
+  },
+  {
+   "name": "page background",
+   "group": "look",
+   "value": "#F5F5F5",
+   "source": "res colors.xml bg_color"
+  },
+  {
+   "name": "main tabs",
+   "group": "screens",
+   "value": "Dispositivo, Mensagem, Eu (+ Álbum de fotos)",
+   "source": "res/layout/activity_main.xml, tab_images"
+  },
+  {
+   "name": "alarm pre-record",
+   "group": "recording",
+   "value": 5,
+   "unit": "s",
+   "estimated": true
+  },
+  {
+   "name": "alarm post-record",
+   "group": "recording",
+   "value": 30,
+   "unit": "s",
+   "estimated": true
+  },
+  {
+   "name": "movement chance per 10 min",
+   "group": "simulation",
+   "value": 22,
+   "unit": "%",
+   "estimated": true
+  },
+  {
+   "name": "PTZ speed",
+   "group": "live",
+   "value": 0.25,
+   "unit": "picture widths/s",
+   "estimated": true
+  },
+  {
+   "name": "digital zoom max",
+   "group": "live",
+   "value": 4,
+   "unit": "x",
+   "estimated": true
+  },
+  {
+   "name": "reboot time",
+   "group": "device",
+   "value": 25,
+   "unit": "s",
+   "estimated": true
+  },
+  {
+   "name": "protocol header size",
+   "group": "camera protocol",
+   "value": 20,
+   "unit": "bytes",
+   "source": "libFunSDK.so CProtocolNetIP::InitMsg 0xfa0bd8"
+  },
+  {
+   "name": "header first byte",
+   "group": "camera protocol",
+   "value": "0xFF",
+   "source": "InitMsg 0xfa0bd8, CheckPTL 0xfa1674"
+  },
+  {
+   "name": "header version byte",
+   "group": "camera protocol",
+   "value": 1,
+   "source": "InitMsg 0xfa0bd8"
+  },
+  {
+   "name": "login message id",
+   "group": "camera protocol",
+   "value": 1000,
+   "source": "CProtocolNetIP::NewLoginPTL 0xfa4efc"
+  },
+  {
+   "name": "login reply message id",
+   "group": "camera protocol",
+   "value": 1001,
+   "source": "CProtocolNetIP::ParsePTL 0xfa1de0 (0x3e9)"
+  },
+  {
+   "name": "login type",
+   "group": "camera protocol",
+   "value": "DVRIP-Web",
+   "source": "NewLoginPTL 0xfa4efc"
+  },
+  {
+   "name": "login encrypt type",
+   "group": "camera protocol",
+   "value": "MD5",
+   "source": "NewLoginPTL 0xfa4efc"
+  },
+  {
+   "name": "password hash",
+   "group": "camera protocol",
+   "value": "MD5 folded to 8 chars, (d[2i]+d[2i+1]) mod 62 -> 0-9A-Za-z",
+   "source": "XMMD5Encrypt 0xf8f578"
+  },
+  {
+   "name": "system info message id",
+   "group": "camera protocol",
+   "value": 1020,
+   "source": "CDeviceV2::UpdateDevConfig 0xbe49d0 (0x3fc)"
+  },
+  {
+   "name": "keep-alive message id",
+   "group": "camera protocol",
+   "value": 1006,
+   "source": "NewHeartbeatPacketPTL 0xfa3d20 (0x3ee)"
+  },
+  {
+   "name": "session id text format",
+   "group": "camera protocol",
+   "value": "0x%010x",
+   "source": "InitMsg 0xfa0bd8"
+  },
+  {
+   "name": "success result code",
+   "group": "camera protocol",
+   "value": 100,
+   "source": "CProtocolNetIP::ParseError 0xfa3648"
+  },
+  {
+   "name": "wrong password result codes",
+   "group": "camera protocol",
+   "value": "106, 203",
+   "source": "CProtocolNetIP::ParseError 0xfa3648 (both -> -0x2700)"
+  },
+  {
+   "name": "device state message",
+   "group": "camera protocol",
+   "value": 5009,
+   "source": "FUN_SysGetDevState 0xc48db8 (0x1391)"
+  },
+  {
+   "name": "playback speed message",
+   "group": "camera protocol",
+   "value": 5500,
+   "source": "FUN_MediaSetPlaySpeed 0xc5d7f8 (0x157c)"
+  },
+  {
+   "name": "login timeout",
+   "group": "network",
+   "value": 2000,
+   "unit": "ms",
+   "estimated": true
+  },
+  {
+   "name": "login recheck interval",
+   "group": "network",
+   "value": 30,
+   "unit": "s",
+   "estimated": true
+  },
+  {
+   "name": "device run time unit",
+   "group": "camera protocol",
+   "value": "minutes (0x hex)",
+   "estimated": true
+  },
+  {
+   "name": "live view claim message",
+   "group": "live video",
+   "value": 1413,
+   "source": "libFunSDK.so NewMediaControlPTL 0xfa63b4 (0x585)"
+  },
+  {
+   "name": "live view start message",
+   "group": "live video",
+   "value": 1410,
+   "source": "NewMediaControlPTL 0xfa63b4 (0x582)"
+  },
+  {
+   "name": "live view data message",
+   "group": "live video",
+   "value": 1412,
+   "source": "IsDevMediaDataPTL 0xfa15a0 (0x584)"
+  },
+  {
+   "name": "HD stream type",
+   "group": "live video",
+   "value": "Main",
+   "source": "NewMediaControlPTL 0xfa63b4 stream table"
+  },
+  {
+   "name": "SD stream type",
+   "group": "live video",
+   "value": "Extra1",
+   "source": "NewMediaControlPTL 0xfa63b4 stream table (default index 1)"
+  },
+  {
+   "name": "key frame header size",
+   "group": "live video",
+   "value": 16,
+   "unit": "bytes",
+   "source": "CSTDStream::GePacketLen 0xb01c58"
+  },
+  {
+   "name": "P frame header size",
+   "group": "live video",
+   "value": 8,
+   "unit": "bytes",
+   "source": "CSTDStream::GePacketLen 0xb01c58"
+  },
+  {
+   "name": "H.264 codec number",
+   "group": "live video",
+   "value": 2,
+   "source": "CMediaFile::ToFFMpegCodecID 0xd05bf4"
+  },
+  {
+   "name": "H.265 codec number",
+   "group": "live video",
+   "value": 3,
+   "source": "CMediaFile::ToFFMpegCodecID 0xd05bf4"
+  },
+  {
+   "name": "MJPEG codec number",
+   "group": "live video",
+   "value": 0,
+   "source": "CMediaFile::ToFFMpegCodecID 0xd05bf4"
+  },
+  {
+   "name": "keep-alive period",
+   "group": "live video",
+   "value": 20,
+   "unit": "s",
+   "estimated": true
+  },
+  {
+   "name": "video data timeout",
+   "group": "live video",
+   "value": 10,
+   "unit": "s",
+   "estimated": true
+  }
+ ]
+}
